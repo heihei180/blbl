@@ -30,15 +30,19 @@
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:screenOrientation="sensorLandscape" />
 
-        <activity
-            android:name=".feature.settings.SettingsActivity"
-            android:screenOrientation="sensorLandscape" />
-        <activity
-            android:name=".feature.login.QrLoginActivity"
-            android:screenOrientation="sensorLandscape" />
-        <activity
-            android:name=".feature.following.FollowingListActivity"
-            android:screenOrientation="sensorLandscape" />
+	        <activity
+	            android:name=".feature.settings.SettingsActivity"
+	            android:screenOrientation="sensorLandscape" />
+	        <activity
+	            android:name=".feature.risk.GaiaVgateActivity"
+	            android:exported="false"
+	            android:screenOrientation="sensorLandscape" />
+	        <activity
+	            android:name=".feature.login.QrLoginActivity"
+	            android:screenOrientation="sensorLandscape" />
+	        <activity
+	            android:name=".feature.following.FollowingListActivity"
+	            android:screenOrientation="sensorLandscape" />
         <activity
             android:name=".feature.following.UpDetailActivity"
             android:screenOrientation="sensorLandscape" />
