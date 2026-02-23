@@ -202,6 +202,7 @@ object ApkUpdater {
         val uri = FileProvider.getUriForFile(context, authority, apkFile)
         val intent =
             Intent(Intent.ACTION_VIEW).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

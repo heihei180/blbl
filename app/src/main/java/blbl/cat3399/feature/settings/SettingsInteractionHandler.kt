@@ -7,8 +7,6 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
-import android.provider.Settings
 import android.text.InputType
 import android.widget.EditText
 import android.widget.TextView
@@ -916,25 +914,6 @@ class SettingsInteractionHandler(
     private fun startTestUpdateDownload(latestVersionHint: String? = null) {
         if (testUpdateJob?.isActive == true) {
             AppToast.show(activity, "正在下载更新…")
-            return
-        }
-
-        if (Build.VERSION.SDK_INT >= 26 && !activity.packageManager.canRequestPackageInstalls()) {
-            MaterialAlertDialogBuilder(dialogContext())
-                .setTitle("需要授权安装")
-                .setMessage("更新需要允许“安装未知应用”。现在去设置开启吗？")
-                .setPositiveButton("去设置") { _, _ ->
-                    runCatching {
-                        val intent =
-                            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
-                                .setData(Uri.parse("package:${activity.packageName}"))
-                        activity.startActivity(intent)
-                    }.onFailure {
-                        AppToast.show(activity, "无法打开系统设置")
-                    }
-                }
-                .setNegativeButton("取消", null)
-                .show()
             return
         }
 
