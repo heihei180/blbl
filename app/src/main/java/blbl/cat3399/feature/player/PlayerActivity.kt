@@ -500,7 +500,7 @@ class PlayerActivity : BaseActivity() {
         val tChecks0 = SystemClock.elapsedRealtime()
         val shouldHistory = shouldReportHistoryNow()
         val tChecks1 = SystemClock.elapsedRealtime()
-        val shouldHeartbeat = shouldReportPgcHeartbeatNow()
+        val shouldHeartbeat = shouldReportWebHeartbeatNow()
         val tChecks2 = SystemClock.elapsedRealtime()
         if (exitTraceStartAtMs > 0L) {
             exitTraceLog(
@@ -514,10 +514,12 @@ class PlayerActivity : BaseActivity() {
         val cid = currentCid
         val aid = currentAid
         val epId = currentEpId
+        val isPgc = epId != null && epId > 0L
+        val heartbeatType = if (isPgc) 4 else 3
         val seasonId = parseSeasonIdFromPlaylistSource()
 
         if (shouldHistory && aid != null) trace?.log("report:history:enqueue", "sec=$progressSec reason=$reason")
-        if (shouldHeartbeat) trace?.log("report:heartbeat:enqueue", "sec=$progressSec reason=$reason")
+        if (shouldHeartbeat) trace?.log("report:heartbeat:enqueue", "sec=$progressSec type=$heartbeatType reason=$reason")
         BlblApp.launchIo {
             if (shouldHistory && aid != null) {
                 runCatching {
@@ -534,16 +536,16 @@ class PlayerActivity : BaseActivity() {
                         aid = aid,
                         bvid = currentBvid,
                         cid = cid,
-                        epId = epId,
-                        seasonId = seasonId,
+                        epId = epId.takeIf { isPgc },
+                        seasonId = seasonId.takeIf { isPgc },
                         playedTimeSec = progressSec,
-                        type = 4,
+                        type = heartbeatType,
                         playType = 0,
                     )
                 }.onSuccess {
-                    trace?.log("report:heartbeat", "ok=1 sec=$progressSec reason=$reason")
+                    trace?.log("report:heartbeat", "ok=1 sec=$progressSec type=$heartbeatType reason=$reason")
                 }.onFailure {
-                    trace?.log("report:heartbeat", "ok=0 sec=$progressSec reason=$reason")
+                    trace?.log("report:heartbeat", "ok=0 sec=$progressSec type=$heartbeatType reason=$reason")
                 }
             }
         }
@@ -1695,6 +1697,10 @@ class PlayerActivity : BaseActivity() {
         if (aid <= 0L) return false
         val cid = currentCid
         if (cid <= 0L) return false
+        // For PGC playback, only report via webHeartbeat(type=4, epid). Posting both endpoints may create
+        // duplicate history entries (archive + pgc) for the same episode.
+        val epId = currentEpId
+        if (epId != null && epId > 0L) return false
         return true
     }
 
@@ -1704,21 +1710,19 @@ class PlayerActivity : BaseActivity() {
         return src.removePrefix("Bangumi:").trim().toLongOrNull()?.takeIf { it > 0 }
     }
 
-    private fun shouldReportPgcHeartbeatNow(): Boolean {
+    private fun shouldReportWebHeartbeatNow(): Boolean {
         if (!BiliClient.cookies.hasSessData()) return false
         val csrf = BiliClient.cookies.getCookieValue("bili_jct").orEmpty().trim()
         if (csrf.isBlank()) return false
         val cid = currentCid
         if (cid <= 0L) return false
-        val epId = currentEpId ?: return false
-        if (epId <= 0L) return false
         val hasArchiveId = (currentAid ?: 0L) > 0L || currentBvid.isNotBlank()
         if (!hasArchiveId) return false
         return true
     }
 
     private fun shouldReportAnyProgressNow(): Boolean {
-        return shouldReportHistoryNow() || shouldReportPgcHeartbeatNow()
+        return shouldReportHistoryNow() || shouldReportWebHeartbeatNow()
     }
 
     private fun startReportProgressLoop() {
@@ -1748,6 +1752,8 @@ class PlayerActivity : BaseActivity() {
         val cid = currentCid
         val aid = currentAid
         val epId = currentEpId
+        val isPgc = epId != null && epId > 0L
+        val heartbeatType = if (isPgc) 4 else 3
         val seasonId = parseSeasonIdFromPlaylistSource()
         val progressSec = (exo.currentPosition.coerceAtLeast(0L) / 1000L)
         if (token != reportToken) return
@@ -1759,7 +1765,7 @@ class PlayerActivity : BaseActivity() {
         }
 
         val shouldHistory = shouldReportHistoryNow()
-        val shouldHeartbeat = shouldReportPgcHeartbeatNow()
+        val shouldHeartbeat = shouldReportWebHeartbeatNow()
         var anyOk = false
 
         if (shouldHistory && aid != null) {
@@ -1779,17 +1785,17 @@ class PlayerActivity : BaseActivity() {
                     aid = aid,
                     bvid = currentBvid,
                     cid = cid,
-                    epId = epId,
-                    seasonId = seasonId,
+                    epId = epId.takeIf { isPgc },
+                    seasonId = seasonId.takeIf { isPgc },
                     playedTimeSec = progressSec,
-                    type = 4,
+                    type = heartbeatType,
                     playType = 0,
                 )
             }.onSuccess {
                 anyOk = true
-                trace?.log("report:heartbeat", "ok=1 sec=$progressSec reason=$reason")
+                trace?.log("report:heartbeat", "ok=1 sec=$progressSec type=$heartbeatType reason=$reason")
             }.onFailure {
-                trace?.log("report:heartbeat", "ok=0 sec=$progressSec reason=$reason")
+                trace?.log("report:heartbeat", "ok=0 sec=$progressSec type=$heartbeatType reason=$reason")
             }
         }
 
