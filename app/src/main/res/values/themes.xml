@@ -65,6 +65,12 @@
         <item name="android:windowBackground">@color/blbl_bg_tv_pink</item>
         <item name="android:textColorPrimary">@color/blbl_text_tv_pink</item>
         <item name="android:textColorSecondary">@color/blbl_text_secondary_tv_pink</item>
+
+        <!-- Focus resources: use accent color for better contrast on light backgrounds. -->
+        <item name="blblFocusBgRound">@drawable/blbl_focus_bg_round_tv_pink</item>
+        <item name="blblFocusListSelectorRound">@drawable/blbl_focus_list_selector_round_tv_pink</item>
+        <item name="blblFocusStrokeColor">@color/blbl_focus_stroke_tv_pink</item>
+        <item name="blblFocusStrokeFocusOnlyColor">@color/blbl_focus_stroke_focus_only_tv_pink</item>
     </style>
 
     <!-- Player is frozen for this iteration: keep existing blue focus/active states. -->
