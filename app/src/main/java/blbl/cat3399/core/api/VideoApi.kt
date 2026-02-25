@@ -2,6 +2,7 @@ package blbl.cat3399.core.api
 
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.Danmaku
+import blbl.cat3399.core.model.DanmakuUserFilter
 import blbl.cat3399.core.model.VideoCard
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.net.WebCookieMaintainer
@@ -11,9 +12,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
+import java.util.zip.CRC32
 
 internal object VideoApi {
     private const val TAG = "BiliApi"
+
+    private const val DM_FILTER_USER_CACHE_TTL_MS: Long = 10L * 60 * 1000 // 10min
+    private val MID_HASH_REGEX = Regex("^[0-9a-fA-F]{1,8}$")
+    private val MID_REGEX = Regex("^\\d{1,20}$")
+
+    private data class DmFilterUserCache(
+        val mid: Long,
+        val fetchedAtMs: Long,
+        val filter: DanmakuUserFilter,
+    )
+
+    @Volatile
+    private var dmFilterUserCache: DmFilterUserCache? = null
 
     internal interface JsonObj {
         fun optString(name: String, fallback: String): String
@@ -787,6 +803,7 @@ internal object VideoApi {
                         color = e.color.toInt(),
                         fontSize = e.fontsize,
                         weight = e.weight,
+                        midHash = e.midHash?.trim()?.takeIf { it.isNotBlank() },
                     )
                 }
             AppLog.d(TAG, "dmSeg cid=$cid seg=$segmentIndex bytes=${bytes.size} size=${list.size} state=${reply.state}")
@@ -840,6 +857,179 @@ internal object VideoApi {
             count = reply.count,
             setting = setting,
         )
+    }
+
+    suspend fun dmFilterUser(forceRefresh: Boolean = false): DanmakuUserFilter {
+        // Requires login (SESSDATA).
+        val mid =
+            BiliClient.cookies.getCookieValue("DedeUserID")
+                ?.trim()
+                ?.toLongOrNull()
+                ?.takeIf { it > 0L }
+                ?: return DanmakuUserFilter.EMPTY
+
+        if (!BiliClient.cookies.hasSessData()) return DanmakuUserFilter.EMPTY
+
+        val now = System.currentTimeMillis()
+        val cached = dmFilterUserCache
+        if (!forceRefresh && cached != null && cached.mid == mid && now - cached.fetchedAtMs < DM_FILTER_USER_CACHE_TTL_MS) {
+            return cached.filter
+        }
+
+        try {
+            val fetched = fetchDmFilterUser()
+            dmFilterUserCache = DmFilterUserCache(mid = mid, fetchedAtMs = now, filter = fetched)
+            return fetched
+        } catch (t: Throwable) {
+            // -101: not logged in (cookie may be stale); do not apply stale filters.
+            if ((t as? BiliApiException)?.apiCode == -101) {
+                dmFilterUserCache = null
+                return DanmakuUserFilter.EMPTY
+            }
+            AppLog.w(TAG, "dmFilterUser failed mid=$mid", t)
+            return cached?.takeIf { it.mid == mid }?.filter ?: DanmakuUserFilter.EMPTY
+        }
+    }
+
+    private suspend fun fetchDmFilterUser(): DanmakuUserFilter {
+        val url = "https://api.bilibili.com/x/dm/filter/user"
+        val json =
+            BiliClient.getJson(
+                url,
+                headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = true),
+                noCookies = true,
+            )
+
+        val code = json.optInt("code", 0)
+        if (code != 0) {
+            val msg = json.optString("message", json.optString("msg", ""))
+            throw BiliApiException(apiCode = code, apiMessage = msg)
+        }
+
+        val list = json.optJSONObject("data")?.optJSONArray("rule") ?: JSONArray()
+        val keywords = ArrayList<String>(minOf(64, list.length()))
+        val regexes = ArrayList<Regex>(minOf(32, list.length()))
+        val blockedMidHashes = LinkedHashSet<String>()
+
+        for (i in 0 until list.length()) {
+            val obj = list.optJSONObject(i) ?: continue
+            val type = obj.optInt("type", -1)
+            val raw =
+                obj.optString(
+                    "filter",
+                    obj.optString(
+                        "filter_content",
+                        obj.optString("content", ""),
+                    ),
+                ).trim()
+
+            if (raw.isBlank()) continue
+
+            when (type) {
+                0 -> keywords.add(raw)
+
+                1 -> {
+                    val r = normalizeRegexRule(raw)
+                    if (r == null) {
+                        AppLog.w(TAG, "dmFilterUser bad regex: ${raw.take(120)}")
+                        continue
+                    }
+                    regexes.add(r)
+                }
+
+                2 -> {
+                    normalizeMidHashRule(raw)?.let { blockedMidHashes.add(it) }
+                }
+            }
+        }
+
+        return DanmakuUserFilter(
+            keywords = keywords.distinct(),
+            regexes = regexes.distinctBy { it.pattern },
+            blockedUserMidHashes = blockedMidHashes,
+        )
+    }
+
+    internal fun normalizeMidHashRule(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return null
+        if (MID_REGEX.matches(trimmed)) {
+            val mid = trimmed.toLongOrNull()?.takeIf { it > 0L } ?: return null
+            // For type=2 rules, Bilibili usually stores CRC32(mid) as a hex string.
+            // Some values may lose leading zeros, resulting in < 8 chars (e.g. "dc0589").
+            // If the server ever returns a numeric MID here, it should be much longer than 8 chars.
+            return if (trimmed.length > 8) midHashOfMid(mid) else trimmed.lowercase(Locale.US).padStart(8, '0')
+        }
+        if (MID_HASH_REGEX.matches(trimmed)) return trimmed.lowercase(Locale.US).padStart(8, '0')
+        return null
+    }
+
+    internal fun normalizeRegexRule(raw: String): Regex? {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return null
+
+        val literal = parseRegexLiteral(trimmed)
+        val pattern = literal?.pattern ?: trimmed
+        val options = literal?.options.orEmpty()
+
+        return runCatching {
+            if (options.isEmpty()) {
+                Regex(pattern)
+            } else {
+                Regex(pattern, options)
+            }
+        }.getOrNull()
+    }
+
+    private data class RegexLiteral(
+        val pattern: String,
+        val options: Set<RegexOption>,
+    )
+
+    private fun parseRegexLiteral(raw: String): RegexLiteral? {
+        // Bilibili web regex rules are usually in the form "/pattern/" (optionally with flags: "/pattern/im").
+        if (!raw.startsWith("/")) return null
+        val closingSlashIndex = findLastUnescapedSlash(raw) ?: return null
+        if (closingSlashIndex <= 0) return null
+
+        val pattern = raw.substring(1, closingSlashIndex)
+        val flags = raw.substring(closingSlashIndex + 1)
+        if (flags.isBlank()) return RegexLiteral(pattern = pattern, options = emptySet())
+
+        val options = LinkedHashSet<RegexOption>()
+        val ignored = StringBuilder()
+        for (c in flags) {
+            when (c) {
+                'i' -> options.add(RegexOption.IGNORE_CASE)
+                'm' -> options.add(RegexOption.MULTILINE)
+                's' -> options.add(RegexOption.DOT_MATCHES_ALL)
+                else -> if (!c.isWhitespace()) ignored.append(c)
+            }
+        }
+        if (ignored.isNotEmpty()) {
+            AppLog.w(TAG, "dmFilterUser ignored regex flags=${ignored} raw=${raw.take(120)}")
+        }
+        return RegexLiteral(pattern = pattern, options = options)
+    }
+
+    private fun findLastUnescapedSlash(raw: String): Int? {
+        for (i in raw.length - 1 downTo 1) {
+            if (raw[i] != '/') continue
+            var backslashes = 0
+            var j = i - 1
+            while (j >= 0 && raw[j] == '\\') {
+                backslashes++
+                j--
+            }
+            if (backslashes % 2 == 0) return i
+        }
+        return null
+    }
+
+    private fun midHashOfMid(mid: Long): String {
+        val crc = CRC32()
+        crc.update(mid.toString().toByteArray(Charsets.UTF_8))
+        return java.lang.Long.toHexString(crc.value).padStart(8, '0')
     }
 
     internal fun parseVideoCard(obj: JsonObj): VideoCard? {

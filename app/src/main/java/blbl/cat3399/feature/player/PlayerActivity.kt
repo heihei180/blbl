@@ -2515,10 +2515,11 @@ class PlayerActivity : BaseActivity() {
         return withContext(Dispatchers.IO) {
             val prefs = BiliClient.prefs
             val followBili = prefs.danmakuFollowBiliShield
+            val hasSess = BiliClient.cookies.hasSessData()
             if (session.debugEnabled) {
-                AppLog.d("Player", "danmakuMeta cid=$cid aid=${aid ?: -1} followBili=$followBili hasSess=${BiliClient.cookies.hasSessData()}")
+                AppLog.d("Player", "danmakuMeta cid=$cid aid=${aid ?: -1} followBili=$followBili hasSess=$hasSess")
             }
-            val dmView = if (followBili && BiliClient.cookies.hasSessData()) {
+            val dmView = if (followBili && hasSess) {
                 val t0 = SystemClock.elapsedRealtime()
                 runCatching { BiliApi.dmWebView(cid, aid) }
                     .onFailure { AppLog.w("Player", "dmWebView failed", it) }
@@ -2526,6 +2527,21 @@ class PlayerActivity : BaseActivity() {
                     .also {
                         val cost = SystemClock.elapsedRealtime() - t0
                         trace?.log("danmakuMeta:dmWebView", "ok=${it != null} cost=${cost}ms")
+                    }
+            } else {
+                null
+            }
+            val userFilter = if (followBili && hasSess) {
+                val t0 = SystemClock.elapsedRealtime()
+                runCatching { BiliApi.dmFilterUser() }
+                    .onFailure { AppLog.w("Player", "dmFilterUser failed", it) }
+                    .getOrNull()
+                    .also {
+                        val cost = SystemClock.elapsedRealtime() - t0
+                        val kw = it?.keywords?.size ?: 0
+                        val re = it?.regexes?.size ?: 0
+                        val user = it?.blockedUserMidHashes?.size ?: 0
+                        trace?.log("danmakuMeta:dmFilterUser", "ok=${it != null} kw=$kw re=$re user=$user cost=${cost}ms")
                     }
             } else {
                 null
@@ -2539,12 +2555,15 @@ class PlayerActivity : BaseActivity() {
                 allowSpecial = prefs.danmakuAllowSpecial && (setting?.allowSpecial ?: true),
                 aiEnabled = prefs.danmakuAiShieldEnabled || (setting?.aiEnabled ?: false),
                 aiLevel = maxOf(prefs.danmakuAiShieldLevel, setting?.aiLevel ?: 0),
+                keywords = userFilter?.keywords.orEmpty(),
+                regexes = userFilter?.regexes.orEmpty(),
+                blockedUserMidHashes = userFilter?.blockedUserMidHashes.orEmpty(),
             )
             val segmentTotal = dmView?.segmentTotal?.takeIf { it > 0 } ?: 0
             val segmentSizeMs = dmView?.segmentPageSizeMs?.takeIf { it > 0 }?.toInt() ?: DANMAKU_DEFAULT_SEGMENT_MS
             AppLog.i(
                 "Player",
-                "danmaku cid=$cid segTotal=$segmentTotal segSizeMs=$segmentSizeMs followBili=$followBili hasDmSetting=${setting != null}",
+                "danmaku cid=$cid segTotal=$segmentTotal segSizeMs=$segmentSizeMs followBili=$followBili hasSess=$hasSess hasDmSetting=${setting != null} filters=kw${userFilter?.keywords?.size ?: 0},re${userFilter?.regexes?.size ?: 0},user${userFilter?.blockedUserMidHashes?.size ?: 0}",
             )
             DanmakuMeta(shield = shield, segmentTotal = segmentTotal, segmentSizeMs = segmentSizeMs).also {
                 trace?.log("danmakuMeta:prepare:done")

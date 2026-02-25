@@ -15,7 +15,7 @@ message DanmakuElem {
   int32 mode = 3;
   int32 fontsize = 4;
   uint32 color = 5;
+  string mid_hash = 6;
   string content = 7;
   int32 weight = 9;
 }
-

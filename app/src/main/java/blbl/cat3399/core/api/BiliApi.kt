@@ -5,6 +5,7 @@ import blbl.cat3399.core.model.BangumiEpisode
 import blbl.cat3399.core.model.BangumiSeason
 import blbl.cat3399.core.model.BangumiSeasonDetail
 import blbl.cat3399.core.model.Danmaku
+import blbl.cat3399.core.model.DanmakuUserFilter
 import blbl.cat3399.core.model.FavFolder
 import blbl.cat3399.core.model.Following
 import blbl.cat3399.core.model.LiveAreaParent
@@ -1066,6 +1067,8 @@ object BiliApi {
     suspend fun dmSeg(cid: Long, segmentIndex: Int): List<Danmaku> = VideoApi.dmSeg(cid = cid, segmentIndex = segmentIndex)
 
     suspend fun dmWebView(cid: Long, aid: Long? = null): DanmakuWebView = VideoApi.dmWebView(cid = cid, aid = aid)
+
+    suspend fun dmFilterUser(forceRefresh: Boolean = false): DanmakuUserFilter = VideoApi.dmFilterUser(forceRefresh = forceRefresh)
 
     private fun parseSpaceArcSearchVideoCards(arr: JSONArray): List<VideoCard> {
         val out = ArrayList<VideoCard>(arr.length())

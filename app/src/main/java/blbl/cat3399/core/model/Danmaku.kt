@@ -7,4 +7,5 @@ data class Danmaku(
     val color: Int,
     val fontSize: Int,
     val weight: Int,
+    val midHash: String? = null,
 )
