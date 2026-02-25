@@ -87,6 +87,8 @@ internal class DpadGridController(
 
     private var installed: Boolean = false
     private var pendingFocusAfterLoadMoreAnchorPos: Int = RecyclerView.NO_POSITION
+    private val focusRetryDelayMillis: Long = 16L
+    private val focusRetryMaxAttempts: Int = 30
 
     private val childListener =
         object : RecyclerView.OnChildAttachStateChangeListener {
@@ -186,15 +188,7 @@ internal class DpadGridController(
         clearPendingFocusAfterLoadMore()
         if (candidatePos == null) return false
 
-        recyclerView.findViewHolderForAdapterPosition(candidatePos)?.itemView?.requestFocus()
-            ?: run {
-                recyclerView.scrollToPosition(candidatePos)
-                recyclerView.postIfAlive(
-                    isAlive = { installed && recyclerView.isAttachedToWindow && config.isEnabled() },
-                ) {
-                    recyclerView.findViewHolderForAdapterPosition(candidatePos)?.itemView?.requestFocus()
-                }
-            }
+        scrollAndFocusAdapterPosition(candidatePos, smooth = true)
         return true
     }
 
@@ -307,16 +301,64 @@ internal class DpadGridController(
         val itemCount = adapter.itemCount
         if (position !in 0 until itemCount) return false
 
-        recyclerView.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
-            ?: run {
-                recyclerView.scrollToPosition(position)
-                recyclerView.postIfAlive(
-                    isAlive = { installed && recyclerView.isAttachedToWindow && config.isEnabled() },
-                ) {
-                    recyclerView.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
-                }
-            }
+        return scrollAndFocusAdapterPosition(position, smooth = true)
+    }
+
+    private fun scrollAndFocusAdapterPosition(position: Int, smooth: Boolean): Boolean {
+        val adapter = recyclerView.adapter ?: return false
+        val itemCount = adapter.itemCount
+        if (position !in 0 until itemCount) return false
+
+        recyclerView.findViewHolderForAdapterPosition(position)?.itemView?.let { itemView ->
+            // Avoid requesting focus while the target view is completely off-screen.
+            // RecyclerView will "jump" to make the focused view visible, which looks like a flash.
+            if (isPartiallyVisibleInRecycler(itemView) && itemView.requestFocus()) return true
+        }
+
+        if (smooth) recyclerView.smoothScrollToPosition(position) else recyclerView.scrollToPosition(position)
+        retryFocusAdapterPosition(position, attemptsLeft = focusRetryMaxAttempts)
         return true
+    }
+
+    private fun retryFocusAdapterPosition(position: Int, attemptsLeft: Int) {
+        if (!isAliveForFocusJump()) return
+
+        val adapter = recyclerView.adapter ?: return
+        val itemCount = adapter.itemCount
+        if (position !in 0 until itemCount) return
+
+        recyclerView.findViewHolderForAdapterPosition(position)?.itemView?.let { itemView ->
+            // Only request focus once the target is at least partially visible, otherwise RecyclerView
+            // may perform an immediate scroll-to-visible (no smooth animation) which looks like a flash.
+            if (isPartiallyVisibleInRecycler(itemView) && itemView.requestFocus()) return
+        }
+
+        if (attemptsLeft <= 0) return
+        recyclerView.postDelayedIfAlive(
+            delayMillis = focusRetryDelayMillis,
+            isAlive = { isAliveForFocusJump() },
+        ) {
+            retryFocusAdapterPosition(position, attemptsLeft = attemptsLeft - 1)
+        }
+    }
+
+    private fun isAliveForFocusJump(): Boolean {
+        if (!installed) return false
+        if (!recyclerView.isAttachedToWindow) return false
+        if (!config.isEnabled()) return false
+        val focused = recyclerView.rootView?.findFocus()
+        if (focused != null && !FocusTreeUtils.isDescendantOf(focused, recyclerView)) return false
+        return true
+    }
+
+    private fun isPartiallyVisibleInRecycler(itemView: View): Boolean {
+        val parentH = recyclerView.height
+        if (parentH <= 0) return false
+        val parentTop = recyclerView.paddingTop
+        val parentBottom = parentH - recyclerView.paddingBottom
+        val childTop = itemView.top
+        val childBottom = itemView.bottom
+        return childBottom > parentTop && childTop < parentBottom
     }
 
     private fun spanCountForLayoutManager(): Int? {

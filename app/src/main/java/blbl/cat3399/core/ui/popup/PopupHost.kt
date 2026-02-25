@@ -39,6 +39,15 @@ internal class PopupHost private constructor(
     private var imeInsets = Insets.NONE
 
     private var modalEntry: ModalEntry? = null
+
+    // Focus "parking" view:
+    // On TV / DPAD devices, dismissing a modal can temporarily detach the currently-focused view.
+    // When that happens, the framework may pick a fallback focus target in the underlying UI
+    // (e.g. a top bar "Back" button), resulting in a visible one-frame focus flicker.
+    //
+    // To prevent that, we temporarily move focus to an invisible, stable 1x1 view attached to the
+    // popup host root. Once the real target regains focus, we disable the parking view again so it
+    // does not participate in navigation.
     private var focusParkingView: View? = null
     private var focusParkingListener: ViewTreeObserver.OnGlobalFocusChangeListener? = null
 
@@ -79,6 +88,15 @@ internal class PopupHost private constructor(
         return view
     }
 
+    /**
+     * Move focus to an invisible, stable view that stays attached while the modal is being dismissed.
+     *
+     * This prevents a system-level "fallback focus target" during view detach/remove (which can be
+     * visible as a brief focus jump to an unrelated control).
+     *
+     * The view is enabled only temporarily and is automatically disabled as soon as focus moves
+     * elsewhere.
+     */
     private fun parkFocusForRestore() {
         val parking = ensureFocusParkingView()
         parking.isFocusable = true
@@ -103,6 +121,9 @@ internal class PopupHost private constructor(
         }
     }
 
+    /**
+     * Disable the parking view so it never becomes a navigation target.
+     */
     private fun disableFocusParking() {
         focusParkingView?.let { v ->
             v.isFocusable = false
@@ -227,6 +248,7 @@ internal class PopupHost private constructor(
             ViewTreeObserver.OnGlobalFocusChangeListener { oldFocus, newFocus ->
                 val entry = modalEntry
                 if (entry == null) return@OnGlobalFocusChangeListener
+                // During dismiss we intentionally park focus outside the modal; do not trap it back in.
                 if (entry.dismissing) return@OnGlobalFocusChangeListener
                 val modalRoot = entry.rootView
 
