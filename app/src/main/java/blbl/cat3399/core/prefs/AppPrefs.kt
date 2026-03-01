@@ -419,6 +419,32 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_PLAYER_PERSISTENT_BOTTOM_PROGRESS, false)
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_PERSISTENT_BOTTOM_PROGRESS, value).apply()
 
+    var playerAudioBalanceLevel: String
+        get() {
+            val raw = prefs.getString(KEY_PLAYER_AUDIO_BALANCE_LEVEL, PLAYER_AUDIO_BALANCE_OFF) ?: PLAYER_AUDIO_BALANCE_OFF
+            val v = raw.trim()
+            return when (v) {
+                PLAYER_AUDIO_BALANCE_OFF,
+                PLAYER_AUDIO_BALANCE_LOW,
+                PLAYER_AUDIO_BALANCE_MEDIUM,
+                PLAYER_AUDIO_BALANCE_HIGH,
+                -> v
+
+                else -> PLAYER_AUDIO_BALANCE_OFF
+            }
+        }
+        set(value) {
+            val v = value.trim()
+            val normalized =
+                when (v) {
+                    PLAYER_AUDIO_BALANCE_LOW -> PLAYER_AUDIO_BALANCE_LOW
+                    PLAYER_AUDIO_BALANCE_MEDIUM -> PLAYER_AUDIO_BALANCE_MEDIUM
+                    PLAYER_AUDIO_BALANCE_HIGH -> PLAYER_AUDIO_BALANCE_HIGH
+                    else -> PLAYER_AUDIO_BALANCE_OFF
+                }
+            prefs.edit().putString(KEY_PLAYER_AUDIO_BALANCE_LEVEL, normalized).apply()
+        }
+
     var playerPlaybackMode: String
         get() = prefs.getString(KEY_PLAYER_PLAYBACK_MODE, PLAYER_PLAYBACK_MODE_NONE) ?: PLAYER_PLAYBACK_MODE_NONE
         set(value) = prefs.edit().putString(KEY_PLAYER_PLAYBACK_MODE, value).apply()
@@ -633,6 +659,7 @@ class AppPrefs(context: Context) {
         private const val KEY_PLAYER_DOUBLE_BACK_TO_EXIT = "player_double_back_on_ended"
         private const val KEY_PLAYER_DOWN_KEY_OSD_FOCUS_TARGET = "player_down_key_osd_focus_target"
         private const val KEY_PLAYER_PERSISTENT_BOTTOM_PROGRESS = "player_persistent_bottom_progress"
+        private const val KEY_PLAYER_AUDIO_BALANCE_LEVEL = "player_audio_balance_level"
         private const val KEY_PLAYER_PLAYBACK_MODE = "player_playback_mode"
         private const val KEY_PLAYER_OSD_BUTTONS = "player_osd_buttons"
         private const val KEY_PLAYER_OSD_BUTTONS_DETAIL_MIGRATED = "player_osd_buttons_detail_migrated"
@@ -656,6 +683,11 @@ class AppPrefs(context: Context) {
 
         const val PLAYER_ENGINE_EXO = "exoplayer"
         const val PLAYER_ENGINE_IJK = "ijkplayer"
+
+        const val PLAYER_AUDIO_BALANCE_OFF = "off"
+        const val PLAYER_AUDIO_BALANCE_LOW = "low"
+        const val PLAYER_AUDIO_BALANCE_MEDIUM = "medium"
+        const val PLAYER_AUDIO_BALANCE_HIGH = "high"
 
         const val PLAYER_PLAYBACK_MODE_NONE = "none"
         const val PLAYER_PLAYBACK_MODE_LOOP_ONE = "loop_one"

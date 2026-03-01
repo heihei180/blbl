@@ -44,6 +44,7 @@ import blbl.cat3399.core.ui.popup.PopupActionRole
 import blbl.cat3399.core.ui.popup.PopupHost
 import blbl.cat3399.databinding.ActivityPlayerBinding
 import blbl.cat3399.databinding.DialogLiveChatBinding
+import blbl.cat3399.feature.player.AudioBalanceLevel
 import blbl.cat3399.feature.player.PlayerOsdSizing
 import blbl.cat3399.feature.player.PlayerSettingsAdapter
 import blbl.cat3399.feature.player.PlayerUiMode
@@ -157,7 +158,11 @@ class LivePlayerActivity : BaseActivity() {
                 PlayerEngineKind.IjkPlayer -> {
                     IjkPlayerEngine(context = this)
                 }
-                PlayerEngineKind.ExoPlayer -> ExoPlayerEngine(context = this)
+                PlayerEngineKind.ExoPlayer ->
+                    ExoPlayerEngine(
+                        context = this,
+                        audioBalanceLevel = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel),
+                    )
             }
         player = engine
         applyRenderForEngine(engine, prefs)
@@ -511,6 +516,7 @@ class LivePlayerActivity : BaseActivity() {
                 when (item.title) {
                     "清晰度" -> showQualityDialog()
                     "线路选择" -> showLineDialog()
+                    "音频平衡" -> showAudioBalanceDialog()
                     "播放器内核" -> showPlayerEngineDialog()
                     else -> AppToast.show(this, "暂未实现：${item.title}")
                 }
@@ -554,6 +560,32 @@ class LivePlayerActivity : BaseActivity() {
         updateDebugOverlay()
     }
 
+    private fun showAudioBalanceDialog() {
+        val prefs = BiliClient.prefs
+        val options = AudioBalanceLevel.ordered
+        val labels = options.map { it.label }
+        val current = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel)
+        val checked = options.indexOf(current).takeIf { it >= 0 } ?: 0
+
+        AppPopup.singleChoice(
+            context = this,
+            title = "音频平衡",
+            items = labels,
+            checkedIndex = checked,
+        ) { which, _ ->
+            val picked = options.getOrNull(which) ?: AudioBalanceLevel.Off
+            prefs.playerAudioBalanceLevel = picked.prefValue
+            val engine = player
+            if (engine is ExoPlayerEngine) {
+                engine.setAudioBalanceLevel(picked)
+                AppToast.show(this, "音频平衡：${picked.label}")
+            } else {
+                AppToast.show(this, "当前播放器内核不支持音频平衡")
+            }
+            refreshSettings()
+        }
+    }
+
     private fun refreshSettings() {
         val p = lastPlay
         val qn = session.targetQn.takeIf { it > 0 } ?: p?.currentQn ?: LIVE_QN_ORIGINAL
@@ -568,10 +600,12 @@ class LivePlayerActivity : BaseActivity() {
                 PlayerEngineKind.IjkPlayer -> "IjkPlayer"
                 PlayerEngineKind.ExoPlayer -> "ExoPlayer"
             }
+        val balanceLabel = AudioBalanceLevel.fromPrefValue(BiliClient.prefs.playerAudioBalanceLevel).label
         val list =
             listOf(
                 PlayerSettingsAdapter.SettingItem("清晰度", qLabel),
                 PlayerSettingsAdapter.SettingItem("线路选择", lineLabel),
+                PlayerSettingsAdapter.SettingItem("音频平衡", balanceLabel),
                 PlayerSettingsAdapter.SettingItem("播放器内核", engineLabel),
             )
         (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.submit(list)

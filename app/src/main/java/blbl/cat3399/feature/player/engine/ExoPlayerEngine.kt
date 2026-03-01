@@ -15,8 +15,11 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
@@ -25,6 +28,7 @@ import blbl.cat3399.feature.player.CdnFailoverDataSourceFactory
 import blbl.cat3399.feature.player.CdnFailoverState
 import blbl.cat3399.feature.player.DebugStreamKind
 import blbl.cat3399.feature.player.Playable
+import blbl.cat3399.feature.player.AudioBalanceLevel
 import okhttp3.OkHttpClient
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
@@ -33,11 +37,14 @@ internal class ExoPlayerEngine(
     context: Context,
     private val okHttpClient: OkHttpClient = BiliClient.cdnOkHttp,
     private val onTransferHost: ((kind: DebugStreamKind, host: String) -> Unit)? = null,
+    audioBalanceLevel: AudioBalanceLevel = AudioBalanceLevel.Off,
 ) : BlblPlayerEngine {
     private val appContext: Context = context.applicationContext
 
+    private val volumeBalanceProcessor = VolumeBalanceAudioProcessor(level = audioBalanceLevel)
+
     val exoPlayer: ExoPlayer =
-        ExoPlayer.Builder(context)
+        ExoPlayer.Builder(context, BlblRenderersFactory(context.applicationContext, volumeBalanceProcessor))
             .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
             .build()
 
@@ -164,6 +171,10 @@ internal class ExoPlayerEngine(
         listeners.remove(listener)
     }
 
+    fun setAudioBalanceLevel(level: AudioBalanceLevel) {
+        volumeBalanceProcessor.setLevel(level)
+    }
+
     private fun createCdnFactory(kind: DebugStreamKind, urlCandidates: List<String>? = null): DataSource.Factory {
         val listener =
             object : TransferListener {
@@ -241,5 +252,18 @@ internal class ExoPlayerEngine(
                 exoPlayer.setMediaSource(buildProgressive(mainFactory, playable.url, subtitle))
             }
         }
+    }
+}
+
+private class BlblRenderersFactory(
+    context: Context,
+    private val volumeBalanceProcessor: VolumeBalanceAudioProcessor,
+) : DefaultRenderersFactory(context) {
+    override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink {
+        return DefaultAudioSink.Builder(context)
+            .setEnableFloatOutput(enableFloatOutput)
+            .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+            .setAudioProcessors(arrayOf(volumeBalanceProcessor))
+            .build()
     }
 }

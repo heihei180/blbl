@@ -45,6 +45,7 @@ enum class SettingId(
     PlayerPreferredCodec("player_preferred_codec"),
     PlayerRenderView("player_render_view"),
     PlayerEngineKind("player_engine_kind"),
+    PlayerAudioBalance("player_audio_balance"),
     PlayerOsdButtons("player_osd_buttons"),
     PlayerDebugEnabled("player_debug_enabled"),
     PlayerDoubleBackToExit("player_double_back_to_exit"),

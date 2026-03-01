@@ -28,6 +28,7 @@ import blbl.cat3399.core.ui.popup.PopupAction
 import blbl.cat3399.core.ui.popup.PopupActionRole
 import blbl.cat3399.core.update.ApkUpdater
 import blbl.cat3399.feature.player.engine.IjkPlayerPluginUi
+import blbl.cat3399.feature.player.AudioBalanceLevel
 import blbl.cat3399.feature.risk.GaiaVgateActivity
 import blbl.cat3399.ui.MainActivity
 import kotlinx.coroutines.CancellationException
@@ -995,6 +996,21 @@ class SettingsInteractionHandler(
 
                     prefs.playerEngineKind = value
                     AppToast.show(activity, "播放器内核：$selected（下次播放生效）")
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
+            SettingId.PlayerAudioBalance -> {
+                val options = AudioBalanceLevel.ordered
+                val current = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel)
+                val checked = options.indexOf(current).takeIf { it >= 0 } ?: 0
+                showChoiceDialog(
+                    title = "音频平衡",
+                    items = options.map { it.label },
+                    checkedIndex = checked,
+                ) { selected ->
+                    val picked = options.firstOrNull { it.label == selected } ?: AudioBalanceLevel.Off
+                    prefs.playerAudioBalanceLevel = picked.prefValue
                     renderer.refreshSection(entry.id)
                 }
             }

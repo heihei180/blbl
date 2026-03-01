@@ -28,6 +28,7 @@ internal object PlayerSettingKeys {
     const val AUDIO_TRACK = "audio_track"
     const val CODEC = "codec"
     const val PLAYBACK_SPEED = "playback_speed"
+    const val AUDIO_BALANCE = "audio_balance"
     const val PLAYBACK_MODE = "playback_mode"
     const val SUBTITLE_LANG = "subtitle_lang"
     const val SUBTITLE_TEXT_SIZE = "subtitle_text_size"
@@ -46,6 +47,7 @@ internal fun PlayerActivity.handleSettingsItemClick(item: PlayerSettingsAdapter.
         PlayerSettingKeys.AUDIO_TRACK -> showAudioDialog()
         PlayerSettingKeys.CODEC -> showCodecDialog()
         PlayerSettingKeys.PLAYBACK_SPEED -> showSpeedDialog()
+        PlayerSettingKeys.AUDIO_BALANCE -> showAudioBalanceDialog()
         PlayerSettingKeys.PLAYBACK_MODE -> showPlaybackModeDialog()
         PlayerSettingKeys.SUBTITLE_LANG -> showSubtitleLangDialog()
         PlayerSettingKeys.SUBTITLE_TEXT_SIZE -> showSubtitleTextSizeDialog()
@@ -109,6 +111,13 @@ internal fun PlayerActivity.refreshSettings(adapter: PlayerSettingsAdapter) {
                     key = PlayerSettingKeys.PLAYBACK_SPEED,
                     title = "播放速度",
                     subtitle = String.format(Locale.US, "%.2fx", session.playbackSpeed),
+                ),
+            )
+            add(
+                PlayerSettingsAdapter.SettingItem(
+                    key = PlayerSettingKeys.AUDIO_BALANCE,
+                    title = "音频平衡",
+                    subtitle = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel).label,
                 ),
             )
             add(
@@ -387,6 +396,30 @@ internal fun PlayerActivity.showSpeedDialog() {
         session = session.copy(playbackSpeed = v)
         player?.setPlaybackSpeed(v)
         refreshSettings(binding.recyclerSettings.adapter as PlayerSettingsAdapter)
+    }
+}
+
+internal fun PlayerActivity.showAudioBalanceDialog() {
+    val prefs = BiliClient.prefs
+    val options = AudioBalanceLevel.ordered
+    val current = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel)
+    val checked = options.indexOf(current).takeIf { it >= 0 } ?: 0
+
+    showSettingsSingleChoiceDialog(
+        title = "音频平衡",
+        items = options.map { it.label },
+        checkedIndex = checked,
+    ) { which, _ ->
+        val picked = options.getOrNull(which) ?: AudioBalanceLevel.Off
+        prefs.playerAudioBalanceLevel = picked.prefValue
+        val engine = player
+        if (engine is ExoPlayerEngine) {
+            engine.setAudioBalanceLevel(picked)
+            AppToast.show(this, "音频平衡：${picked.label}")
+        } else {
+            AppToast.show(this, "当前播放器内核不支持音频平衡")
+        }
+        (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let { refreshSettings(it) }
     }
 }
 

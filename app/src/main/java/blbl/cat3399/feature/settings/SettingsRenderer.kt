@@ -12,6 +12,7 @@ import blbl.cat3399.BuildConfig
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.ui.FocusTreeUtils
 import blbl.cat3399.databinding.ActivitySettingsBinding
+import blbl.cat3399.feature.player.AudioBalanceLevel
 import java.util.Locale
 
 class SettingsRenderer(
@@ -234,6 +235,12 @@ class SettingsRenderer(
                     SettingEntry(SettingId.PlayerPreferredCodec, "视频编码", prefs.playerPreferredCodec, null),
                     SettingEntry(SettingId.PlayerRenderView, "渲染视图", SettingsText.renderViewText(prefs.playerRenderViewType), null),
                     SettingEntry(SettingId.PlayerEngineKind, "播放器内核", SettingsText.playerEngineText(prefs.playerEngineKind), null),
+                    SettingEntry(
+                        SettingId.PlayerAudioBalance,
+                        "音频平衡",
+                        AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel).label,
+                        null,
+                    ),
                     SettingEntry(SettingId.PlayerOsdButtons, "OSD按钮显示", SettingsText.playerOsdButtonsText(prefs.playerOsdButtons), null),
                     SettingEntry(SettingId.PlayerDebugEnabled, "显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                     SettingEntry(SettingId.PlayerDoubleBackToExit, "按两次退出键才退出播放器", if (prefs.playerDoubleBackToExit) "开" else "关", null),

@@ -708,6 +708,7 @@ class PlayerActivity : BaseActivity() {
                 PlayerEngineKind.ExoPlayer -> {
                     ExoPlayerEngine(
                         context = this,
+                        audioBalanceLevel = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel),
                         onTransferHost = { kind, host ->
                             when (kind) {
                                 DebugStreamKind.VIDEO -> debug.videoTransferHost = host
