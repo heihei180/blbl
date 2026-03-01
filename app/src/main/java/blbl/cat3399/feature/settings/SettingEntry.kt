@@ -47,6 +47,7 @@ enum class SettingId(
     PlayerEngineKind("player_engine_kind"),
     PlayerAudioBalance("player_audio_balance"),
     PlayerOsdButtons("player_osd_buttons"),
+    PlayerCustomShortcuts("player_custom_shortcuts"),
     PlayerDebugEnabled("player_debug_enabled"),
     PlayerDoubleBackToExit("player_double_back_to_exit"),
     PlayerDownKeyOsdFocusTarget("player_down_key_osd_focus_target"),

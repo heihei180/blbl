@@ -10,16 +10,25 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.text.InputType
+import android.view.KeyEvent
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.widget.TextView
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import blbl.cat3399.BuildConfig
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.log.LogExporter
 import blbl.cat3399.core.log.LogUploadClient
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppPrefs
+import blbl.cat3399.core.prefs.PlayerCustomShortcut
+import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
+import blbl.cat3399.core.prefs.PlayerCustomShortcutsStore
 import blbl.cat3399.core.theme.LauncherAliasManager
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.Immersive
@@ -1017,6 +1026,8 @@ class SettingsInteractionHandler(
 
             SettingId.PlayerOsdButtons -> showPlayerOsdButtonsDialog(sectionIndex = state.currentSectionIndex, focusId = entry.id)
 
+            SettingId.PlayerCustomShortcuts -> showPlayerCustomShortcutsDialog(sectionIndex = state.currentSectionIndex, focusId = entry.id)
+
             SettingId.PlayerDebugEnabled -> {
                 prefs.playerDebugEnabled = !prefs.playerDebugEnabled
                 renderer.refreshSection(entry.id)
@@ -1151,6 +1162,637 @@ class SettingsInteractionHandler(
                 renderer.showSection(sectionIndex, focusId = focusId)
             },
         )
+    }
+
+    private fun showPlayerCustomShortcutsDialog(sectionIndex: Int, focusId: SettingId) {
+        fun keyLabel(keyCode: Int): String {
+            val raw = runCatching { KeyEvent.keyCodeToString(keyCode) }.getOrNull()?.trim().orEmpty()
+            if (raw.isBlank()) return keyCode.toString()
+            val text = raw.removePrefix("KEYCODE_")
+            return when {
+                text.startsWith("NUMPAD_") && text.length == "NUMPAD_0".length -> "小键盘${text.last()}"
+                text.length == 1 && text[0] in '0'..'9' -> text
+                else -> text
+            }
+        }
+
+        fun actionLabel(action: PlayerCustomShortcutAction): String {
+            return when (action) {
+                PlayerCustomShortcutAction.ToggleSubtitles -> "字幕：开/关"
+                PlayerCustomShortcutAction.ToggleDanmaku -> "弹幕：开/关"
+                PlayerCustomShortcutAction.ToggleDebugOverlay -> "调试信息：开/关"
+                PlayerCustomShortcutAction.TogglePersistentBottomProgress -> "底部常驻进度条：开/关"
+                is PlayerCustomShortcutAction.SetPlaybackSpeed -> "播放速度：${String.format(Locale.US, "%.2fx", action.speed)}"
+                is PlayerCustomShortcutAction.SetResolutionQn -> "分辨率：${SettingsText.qnText(action.qn)}"
+                is PlayerCustomShortcutAction.SetAudioId -> "音轨：${SettingsText.audioText(action.audioId)}"
+                is PlayerCustomShortcutAction.SetCodec -> "视频编码：${action.codec}"
+                is PlayerCustomShortcutAction.SetPlaybackMode -> "播放模式：${SettingsText.playbackModeText(action.mode)}"
+                is PlayerCustomShortcutAction.SetSubtitleLang -> {
+                    val lang = action.lang.trim()
+                    if (lang.equals(PlayerCustomShortcutAction.SUBTITLE_LANG_DEFAULT, ignoreCase = true)) {
+                        "字幕语言：跟随全局"
+                    } else {
+                        "字幕语言：${SettingsText.subtitleLangText(lang)}"
+                    }
+                }
+                is PlayerCustomShortcutAction.SetSubtitleTextSize -> "字幕大小：${action.textSizeSp.toInt()}"
+                is PlayerCustomShortcutAction.SetDanmakuOpacity -> "弹幕透明度：${String.format(Locale.US, "%.2f", action.opacity)}"
+                is PlayerCustomShortcutAction.SetDanmakuTextSize -> "弹幕大小：${action.textSizeSp.toInt()}"
+                is PlayerCustomShortcutAction.SetDanmakuSpeed -> "弹幕速度：${action.speedLevel}"
+                is PlayerCustomShortcutAction.SetDanmakuArea -> "弹幕区域：${SettingsText.areaText(action.area)}"
+            }
+        }
+
+        fun bindingLabel(binding: PlayerCustomShortcut): String =
+            "${keyLabel(binding.keyCode)} → ${actionLabel(binding.action)}"
+
+        fun loadShortcuts(): List<PlayerCustomShortcut> = BiliClient.prefs.playerCustomShortcuts
+
+        fun upsert(binding: PlayerCustomShortcut) {
+            val prefs = BiliClient.prefs
+            prefs.playerCustomShortcuts = PlayerCustomShortcutsStore.upsert(prefs.playerCustomShortcuts, binding)
+            renderer.refreshSection(SettingId.PlayerCustomShortcuts)
+        }
+
+        fun removeBinding(keyCode: Int) {
+            val prefs = BiliClient.prefs
+            prefs.playerCustomShortcuts = PlayerCustomShortcutsStore.remove(prefs.playerCustomShortcuts, keyCode)
+            renderer.refreshSection(SettingId.PlayerCustomShortcuts)
+        }
+
+        fun clearAll() {
+            BiliClient.prefs.playerCustomShortcuts = PlayerCustomShortcutsStore.clear()
+            renderer.refreshSection(SettingId.PlayerCustomShortcuts)
+        }
+
+        fun optionsTitle(actionType: String): String =
+            when (actionType) {
+                PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_SPEED -> "播放速度"
+                PlayerCustomShortcutAction.TYPE_SET_RESOLUTION_QN -> "分辨率"
+                PlayerCustomShortcutAction.TYPE_SET_AUDIO_ID -> "音轨"
+                PlayerCustomShortcutAction.TYPE_SET_CODEC -> "视频编码"
+                PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_MODE -> "播放模式"
+                PlayerCustomShortcutAction.TYPE_SET_SUBTITLE_LANG -> "字幕语言"
+                PlayerCustomShortcutAction.TYPE_SET_SUBTITLE_TEXT_SIZE -> "字幕字体大小"
+                PlayerCustomShortcutAction.TYPE_SET_DANMAKU_OPACITY -> "弹幕透明度"
+                PlayerCustomShortcutAction.TYPE_SET_DANMAKU_TEXT_SIZE -> "弹幕字体大小"
+                PlayerCustomShortcutAction.TYPE_SET_DANMAKU_SPEED -> "弹幕速度"
+                PlayerCustomShortcutAction.TYPE_SET_DANMAKU_AREA -> "弹幕区域"
+                else -> actionType
+            }
+
+        data class ActionOption(
+            val type: String,
+            val label: String,
+            val requiresValue: Boolean,
+        )
+
+        class ShortcutItemVh(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            private val tvLabel: TextView = itemView.findViewById(blbl.cat3399.R.id.tv_label)
+            private val tvCheck: TextView = itemView.findViewById(blbl.cat3399.R.id.tv_check)
+
+            fun bind(label: String, position: Int, itemCount: Int, onClick: () -> Unit) {
+                tvLabel.text = label
+                tvCheck.visibility = View.GONE
+                itemView.setOnClickListener { onClick() }
+                itemView.setOnKeyListener { _, keyCode, event ->
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT,
+                        KeyEvent.KEYCODE_DPAD_RIGHT,
+                        -> true
+
+                        KeyEvent.KEYCODE_DPAD_UP -> position <= 0
+                        KeyEvent.KEYCODE_DPAD_DOWN -> position >= (itemCount - 1)
+
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER,
+                        ->
+                            if (event.action == KeyEvent.ACTION_UP) {
+                                onClick()
+                                true
+                            } else {
+                                false
+                            }
+
+                        else -> false
+                    }
+                }
+            }
+        }
+
+        class ShortcutListAdapter(
+            private val list: List<PlayerCustomShortcut>,
+            private val onItemClick: (PlayerCustomShortcut) -> Unit,
+        ) : RecyclerView.Adapter<ShortcutItemVh>() {
+            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ShortcutItemVh {
+                val view = LayoutInflater.from(parent.context).inflate(blbl.cat3399.R.layout.item_popup_choice, parent, false)
+                return ShortcutItemVh(view)
+            }
+
+            override fun onBindViewHolder(holder: ShortcutItemVh, position: Int) {
+                val item = list.getOrNull(position) ?: return
+                holder.bind(
+                    label = bindingLabel(item),
+                    position = position,
+                    itemCount = list.size,
+                    onClick = { onItemClick(item) },
+                )
+            }
+
+            override fun getItemCount(): Int = list.size
+        }
+
+        class Controller {
+            fun showManager(focusKeyCode: Int? = null) {
+                var replacing = false
+                val items = loadShortcuts()
+
+                AppPopup.custom(
+                    context = activity,
+                    title = "自定义播放快捷键",
+                    cancelable = true,
+                    actions =
+                        listOf(
+                            PopupAction(
+                                role = PopupActionRole.NEUTRAL,
+                                text = "清空",
+                                dismissOnClick = false,
+                            ) {
+                                if (items.isEmpty()) {
+                                    AppToast.show(activity, "暂无快捷键")
+                                    return@PopupAction
+                                }
+                                replacing = true
+                                showClearConfirm(focusKeyCode = focusKeyCode)
+                            },
+                            PopupAction(
+                                role = PopupActionRole.NEUTRAL,
+                                text = "删除",
+                                dismissOnClick = false,
+                            ) {
+                                if (items.isEmpty()) {
+                                    AppToast.show(activity, "暂无快捷键")
+                                    return@PopupAction
+                                }
+                                replacing = true
+                                showDeletePicker(focusKeyCode = focusKeyCode)
+                            },
+                            PopupAction(
+                                role = PopupActionRole.NEGATIVE,
+                                text = "关闭",
+                            ),
+                            PopupAction(
+                                role = PopupActionRole.POSITIVE,
+                                text = "新增",
+                                dismissOnClick = false,
+                            ) {
+                                replacing = true
+                                showKeyCapture()
+                            },
+                        ),
+                    preferredActionRole = PopupActionRole.POSITIVE,
+                    autoFocus = true,
+                    onDismiss = {
+                        if (!replacing) renderer.showSection(sectionIndex, focusId = focusId)
+                    },
+                ) { dialogContext ->
+                    val recycler =
+                        (LayoutInflater.from(dialogContext).inflate(blbl.cat3399.R.layout.view_popup_choice_list, null, false) as RecyclerView).apply {
+                            layoutManager = LinearLayoutManager(dialogContext)
+                            itemAnimator = null
+                        }
+
+                    recycler.adapter =
+                        ShortcutListAdapter(items) { picked ->
+                            replacing = true
+                            showActionPicker(keyCode = picked.keyCode, currentAction = picked.action)
+                        }
+
+                    if (items.isNotEmpty()) {
+                        val focusIndex =
+                            focusKeyCode?.let { key ->
+                                items.indexOfFirst { it.keyCode == key }.takeIf { it >= 0 }
+                            } ?: 0
+                        recycler.scrollToPosition(focusIndex)
+                        recycler.post {
+                            val holder = recycler.findViewHolderForAdapterPosition(focusIndex)
+                            (holder?.itemView ?: recycler.getChildAt(0))?.requestFocus()
+                        }
+                    }
+
+                    recycler
+                }
+            }
+
+            private fun showKeyCapture() {
+                var forward = false
+                var captureView: TextView? = null
+                AppPopup.custom(
+                    context = activity,
+                    title = "请按下要绑定的按键",
+                    cancelable = true,
+                    actions = emptyList(),
+                    preferredActionRole = null,
+                    autoFocus = false,
+                    onModalAttached = {
+                        captureView?.post { captureView?.requestFocus() }
+                    },
+                    onDismiss = {
+                        if (!forward) showManager()
+                    },
+                ) { dialogContext ->
+                    val tv =
+                        LayoutInflater.from(dialogContext)
+                            .inflate(blbl.cat3399.R.layout.view_player_custom_shortcut_key_capture, null, false) as TextView
+                    captureView = tv
+                    tv.text = "请按下要绑定的按键\n（返回键取消）"
+                    tv.setOnKeyListener { _, keyCode, event ->
+                        if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                        if (event.repeatCount > 0) return@setOnKeyListener true
+
+                        // Let the popup host handle these as "cancel/back".
+                        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode == KeyEvent.KEYCODE_ESCAPE || keyCode == KeyEvent.KEYCODE_BUTTON_B) {
+                            return@setOnKeyListener false
+                        }
+
+                        if (keyCode == KeyEvent.KEYCODE_UNKNOWN || keyCode <= 0) return@setOnKeyListener true
+                        if (PlayerCustomShortcutsStore.isForbiddenKeyCode(keyCode)) {
+                            AppToast.show(activity, "该按键不允许绑定")
+                            return@setOnKeyListener true
+                        }
+
+                        val existing = loadShortcuts().firstOrNull { it.keyCode == keyCode }?.action
+                        forward = true
+                        showActionPicker(keyCode = keyCode, currentAction = existing)
+                        true
+                    }
+                    tv
+                }
+            }
+
+            private fun showActionPicker(keyCode: Int, currentAction: PlayerCustomShortcutAction?) {
+                var forward = false
+                val options =
+                    listOf(
+                        ActionOption(PlayerCustomShortcutAction.TYPE_TOGGLE_SUBTITLES, "字幕 开/关", requiresValue = false),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_TOGGLE_DANMAKU, "弹幕 开/关", requiresValue = false),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_TOGGLE_DEBUG_OVERLAY, "调试信息 开/关", requiresValue = false),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_TOGGLE_PERSISTENT_BOTTOM_PROGRESS, "底部常驻进度条 开/关", requiresValue = false),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_SPEED, "播放速度", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_RESOLUTION_QN, "分辨率", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_AUDIO_ID, "音轨", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_CODEC, "视频编码", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_MODE, "播放模式", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_SUBTITLE_LANG, "字幕语言", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_SUBTITLE_TEXT_SIZE, "字幕字体大小", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_DANMAKU_OPACITY, "弹幕透明度", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_DANMAKU_TEXT_SIZE, "弹幕字体大小", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_DANMAKU_SPEED, "弹幕速度", requiresValue = true),
+                        ActionOption(PlayerCustomShortcutAction.TYPE_SET_DANMAKU_AREA, "弹幕区域", requiresValue = true),
+                    )
+
+                val checked =
+                    options.indexOfFirst { it.type == currentAction?.type }
+                        .takeIf { it >= 0 } ?: 0
+
+                AppPopup.singleChoice(
+                    context = activity,
+                    title = "选择动作（${keyLabel(keyCode)}）",
+                    items = options.map { it.label },
+                    checkedIndex = checked,
+                    onDismiss = {
+                        if (!forward) showManager(focusKeyCode = keyCode)
+                    },
+                ) { which, _ ->
+                    val picked = options.getOrNull(which) ?: return@singleChoice
+                    if (picked.requiresValue) {
+                        forward = true
+                        showValuePicker(keyCode = keyCode, actionType = picked.type, currentAction = currentAction)
+                        return@singleChoice
+                    }
+
+                    val action =
+                        when (picked.type) {
+                            PlayerCustomShortcutAction.TYPE_TOGGLE_SUBTITLES -> PlayerCustomShortcutAction.ToggleSubtitles
+                            PlayerCustomShortcutAction.TYPE_TOGGLE_DANMAKU -> PlayerCustomShortcutAction.ToggleDanmaku
+                            PlayerCustomShortcutAction.TYPE_TOGGLE_DEBUG_OVERLAY -> PlayerCustomShortcutAction.ToggleDebugOverlay
+                            PlayerCustomShortcutAction.TYPE_TOGGLE_PERSISTENT_BOTTOM_PROGRESS -> PlayerCustomShortcutAction.TogglePersistentBottomProgress
+                            else -> null
+                        } ?: return@singleChoice
+
+                    forward = true
+                    upsert(PlayerCustomShortcut(keyCode = keyCode, action = action))
+                    showManager(focusKeyCode = keyCode)
+                }
+            }
+
+            private fun showValuePicker(keyCode: Int, actionType: String, currentAction: PlayerCustomShortcutAction?) {
+                var forward = false
+                val title = "${keyLabel(keyCode)} → ${optionsTitle(actionType)}"
+
+                fun cancelBackToActionPicker() {
+                    if (!forward) showActionPicker(keyCode = keyCode, currentAction = currentAction)
+                }
+
+                when (actionType) {
+                    PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_SPEED -> {
+                        val options = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f, 4.0f)
+                        val items = options.map { String.format(Locale.US, "%.2fx", it) }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetPlaybackSpeed)?.speed
+                        val checked = options.indices.minByOrNull { idx -> kotlin.math.abs(options[idx] - (current ?: 1.0f)) } ?: 2
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val v = options.getOrNull(which) ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetPlaybackSpeed(speed = v)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_RESOLUTION_QN -> {
+                        val options = listOf(16, 32, 64, 74, 80, 100, 112, 116, 120, 125, 126, 127, 129)
+                        val items = options.map { SettingsText.qnText(it) }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetResolutionQn)?.qn
+                        val checked = options.indexOf(current).takeIf { it >= 0 } ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val v = options.getOrNull(which) ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetResolutionQn(qn = v)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_AUDIO_ID -> {
+                        val options = listOf(30251, 30250, 30280, 30232, 30216)
+                        val items = options.map { SettingsText.audioText(it) }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetAudioId)?.audioId
+                        val checked = options.indexOf(current).takeIf { it >= 0 } ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val v = options.getOrNull(which) ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetAudioId(audioId = v)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_CODEC -> {
+                        val options = listOf("AVC", "HEVC", "AV1")
+                        val items = options.toList()
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetCodec)?.codec
+                        val checked = options.indexOfFirst { it == current }.takeIf { it >= 0 } ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val v = options.getOrNull(which) ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetCodec(codec = v)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_MODE -> {
+                        val options =
+                            listOf(
+                                AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND to SettingsText.playbackModeText(AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND),
+                                AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST to SettingsText.playbackModeText(AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST),
+                                AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST to SettingsText.playbackModeText(AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST),
+                                AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE to SettingsText.playbackModeText(AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE),
+                                AppPrefs.PLAYER_PLAYBACK_MODE_NONE to SettingsText.playbackModeText(AppPrefs.PLAYER_PLAYBACK_MODE_NONE),
+                                AppPrefs.PLAYER_PLAYBACK_MODE_EXIT to SettingsText.playbackModeText(AppPrefs.PLAYER_PLAYBACK_MODE_EXIT),
+                            )
+                        val items = options.map { it.second }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetPlaybackMode)?.mode
+                        val checked = options.indexOfFirst { it.first == current }.takeIf { it >= 0 } ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val mode = options.getOrNull(which)?.first ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetPlaybackMode(mode = mode)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_SUBTITLE_LANG -> {
+                        val options =
+                            listOf(
+                                PlayerCustomShortcutAction.SUBTITLE_LANG_DEFAULT to "跟随全局",
+                                "auto" to SettingsText.subtitleLangText("auto"),
+                                "zh-Hans" to SettingsText.subtitleLangText("zh-Hans"),
+                                "zh-Hant" to SettingsText.subtitleLangText("zh-Hant"),
+                                "en" to SettingsText.subtitleLangText("en"),
+                                "ja" to SettingsText.subtitleLangText("ja"),
+                                "ko" to SettingsText.subtitleLangText("ko"),
+                            )
+                        val items = options.map { it.second }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetSubtitleLang)?.lang
+                        val checked = options.indexOfFirst { it.first == current }.takeIf { it >= 0 } ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val lang = options.getOrNull(which)?.first ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetSubtitleLang(lang = lang)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_SUBTITLE_TEXT_SIZE -> {
+                        val options = (10..60 step 2).toList()
+                        val items = options.map { it.toString() }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetSubtitleTextSize)?.textSizeSp
+                        val checked =
+                            options.indices.minByOrNull { idx -> kotlin.math.abs(options[idx].toFloat() - (current ?: 26f)) }
+                                ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val sp = (options.getOrNull(which) ?: return@singleChoice).toFloat()
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetSubtitleTextSize(textSizeSp = sp)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_DANMAKU_OPACITY -> {
+                        val options = (20 downTo 1).map { it / 20f }
+                        val items = options.map { String.format(Locale.US, "%.2f", it) }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetDanmakuOpacity)?.opacity
+                        val checked =
+                            options.indices.minByOrNull { idx -> kotlin.math.abs(options[idx] - (current ?: 1f)) }
+                                ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val v = options.getOrNull(which) ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetDanmakuOpacity(opacity = v)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_DANMAKU_TEXT_SIZE -> {
+                        val options = (10..60 step 2).toList()
+                        val items = options.map { it.toString() }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetDanmakuTextSize)?.textSizeSp
+                        val checked =
+                            options.indices.minByOrNull { idx -> kotlin.math.abs(options[idx].toFloat() - (current ?: 18f)) }
+                                ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val sp = (options.getOrNull(which) ?: return@singleChoice).toFloat()
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetDanmakuTextSize(textSizeSp = sp)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_DANMAKU_SPEED -> {
+                        val options = (1..10).toList()
+                        val items = options.map { it.toString() }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetDanmakuSpeed)?.speedLevel
+                        val checked = options.indexOf(current).takeIf { it >= 0 } ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val v = options.getOrNull(which) ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetDanmakuSpeed(speedLevel = v)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+
+                    PlayerCustomShortcutAction.TYPE_SET_DANMAKU_AREA -> {
+                        val options = listOf(1.0f, 0.8f, 0.75f, 2f / 3f, 0.6f, 0.5f, 0.4f, 1f / 3f, 0.25f, 0.2f)
+                        val items = options.map { SettingsText.areaText(it) }
+                        val current = (currentAction as? PlayerCustomShortcutAction.SetDanmakuArea)?.area
+                        val checked =
+                            options.indices.minByOrNull { idx -> kotlin.math.abs(options[idx] - (current ?: 1f)) }
+                                ?: 0
+                        AppPopup.singleChoice(
+                            context = activity,
+                            title = title,
+                            items = items,
+                            checkedIndex = checked,
+                            onDismiss = { cancelBackToActionPicker() },
+                        ) { which, _ ->
+                            val v = options.getOrNull(which) ?: return@singleChoice
+                            forward = true
+                            upsert(PlayerCustomShortcut(keyCode = keyCode, action = PlayerCustomShortcutAction.SetDanmakuArea(area = v)))
+                            showManager(focusKeyCode = keyCode)
+                        }
+                        return
+                    }
+                }
+
+                AppToast.show(activity, "未知动作：$actionType")
+                showActionPicker(keyCode = keyCode, currentAction = currentAction)
+            }
+
+            private fun showDeletePicker(focusKeyCode: Int?) {
+                var forward = false
+                val items = loadShortcuts()
+                val labels = items.map { bindingLabel(it) }
+                val checked = focusKeyCode?.let { k -> items.indexOfFirst { it.keyCode == k }.takeIf { it >= 0 } } ?: 0
+                AppPopup.singleChoice(
+                    context = activity,
+                    title = "删除快捷键",
+                    items = labels.ifEmpty { listOf("暂无快捷键") },
+                    checkedIndex = checked,
+                    onDismiss = {
+                        if (!forward) showManager(focusKeyCode = focusKeyCode)
+                    },
+                ) { which, _ ->
+                    val picked = items.getOrNull(which) ?: return@singleChoice
+                    forward = true
+                    removeBinding(picked.keyCode)
+                    showManager()
+                }
+            }
+
+            private fun showClearConfirm(focusKeyCode: Int?) {
+                var forward = false
+                AppPopup.confirm(
+                    context = activity,
+                    title = "清空快捷键",
+                    message = "确定清空所有自定义播放快捷键？",
+                    positiveText = "清空",
+                    negativeText = "取消",
+                    cancelable = true,
+                    onPositive = {
+                        forward = true
+                        clearAll()
+                        showManager()
+                    },
+                    onNegative = {
+                        forward = true
+                        showManager(focusKeyCode = focusKeyCode)
+                    },
+                    onDismiss = {
+                        if (!forward) showManager(focusKeyCode = focusKeyCode)
+                    },
+                )
+            }
+        }
+
+        Controller().showManager()
     }
 
     private fun showUserAgentDialog(sectionIndex: Int, focusId: SettingId) {

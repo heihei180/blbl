@@ -1263,6 +1263,8 @@ class PlayerActivity : BaseActivity() {
 
         if (isInteractionKey(keyCode)) noteUserInteraction()
 
+        if (dispatchPlayerCustomShortcutIfNeeded(event)) return true
+
         when (keyCode) {
             KeyEvent.KEYCODE_MENU,
             KeyEvent.KEYCODE_SETTINGS,

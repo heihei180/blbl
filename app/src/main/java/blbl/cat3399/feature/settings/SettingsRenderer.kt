@@ -242,6 +242,12 @@ class SettingsRenderer(
                         null,
                     ),
                     SettingEntry(SettingId.PlayerOsdButtons, "OSD按钮显示", SettingsText.playerOsdButtonsText(prefs.playerOsdButtons), null),
+                    SettingEntry(
+                        SettingId.PlayerCustomShortcuts,
+                        "自定义播放快捷键",
+                        prefs.playerCustomShortcuts.let { if (it.isEmpty()) "未设置" else "已设置 ${it.size} 个" },
+                        "播放时按指定按键切换播放设置（再按一次切回上次值）",
+                    ),
                     SettingEntry(SettingId.PlayerDebugEnabled, "显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                     SettingEntry(SettingId.PlayerDoubleBackToExit, "按两次退出键才退出播放器", if (prefs.playerDoubleBackToExit) "开" else "关", null),
                     SettingEntry(

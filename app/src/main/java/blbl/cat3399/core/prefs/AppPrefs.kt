@@ -465,6 +465,16 @@ class AppPrefs(context: Context) {
             prefs.edit().putBoolean(KEY_PLAYER_OSD_BUTTONS_DETAIL_MIGRATED, true).apply()
         }
 
+    internal var playerCustomShortcuts: List<PlayerCustomShortcut>
+        get() = PlayerCustomShortcutsStore.parse(prefs.getString(KEY_PLAYER_CUSTOM_SHORTCUTS, null))
+        set(value) {
+            if (value.isEmpty()) {
+                prefs.edit().remove(KEY_PLAYER_CUSTOM_SHORTCUTS).apply()
+            } else {
+                prefs.edit().putString(KEY_PLAYER_CUSTOM_SHORTCUTS, PlayerCustomShortcutsStore.serialize(value)).apply()
+            }
+        }
+
     var gridSpanCount: Int
         get() {
             val stored = prefs.getInt(KEY_GRID_SPAN, 4)
@@ -663,6 +673,7 @@ class AppPrefs(context: Context) {
         private const val KEY_PLAYER_PLAYBACK_MODE = "player_playback_mode"
         private const val KEY_PLAYER_OSD_BUTTONS = "player_osd_buttons"
         private const val KEY_PLAYER_OSD_BUTTONS_DETAIL_MIGRATED = "player_osd_buttons_detail_migrated"
+        private const val KEY_PLAYER_CUSTOM_SHORTCUTS = "player_custom_shortcuts"
         private const val KEY_GRID_SPAN = "grid_span"
         private const val KEY_DYNAMIC_GRID_SPAN = "dynamic_grid_span"
         private const val KEY_PGC_GRID_SPAN = "pgc_grid_span"

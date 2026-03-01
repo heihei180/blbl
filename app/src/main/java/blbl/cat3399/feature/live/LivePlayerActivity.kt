@@ -33,6 +33,8 @@ import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.Danmaku
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppPrefs
+import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
+import blbl.cat3399.core.prefs.PlayerCustomShortcutsStore
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.BaseActivity
 import blbl.cat3399.core.ui.DoubleBackToExitHandler
@@ -48,6 +50,7 @@ import blbl.cat3399.feature.player.AudioBalanceLevel
 import blbl.cat3399.feature.player.PlayerOsdSizing
 import blbl.cat3399.feature.player.PlayerSettingsAdapter
 import blbl.cat3399.feature.player.PlayerUiMode
+import blbl.cat3399.feature.player.areaText
 import blbl.cat3399.feature.player.danmaku.DanmakuSessionSettings
 import blbl.cat3399.feature.player.engine.BlblPlayerEngine
 import blbl.cat3399.feature.player.engine.ExoPlayerEngine
@@ -72,6 +75,11 @@ class LivePlayerActivity : BaseActivity() {
     private var ijkTextureSurface: Surface? = null
     private val settingsPanelReturnFocus = FocusReturn()
     private var autoHideJob: Job? = null
+    private var shortcutHintJob: Job? = null
+    private val shortcutPrevDanmakuOpacityByKey = HashMap<Int, Float>()
+    private val shortcutPrevDanmakuTextSizeByKey = HashMap<Int, Float>()
+    private val shortcutPrevDanmakuSpeedLevelByKey = HashMap<Int, Int>()
+    private val shortcutPrevDanmakuAreaByKey = HashMap<Int, Float>()
     private var debugJob: Job? = null
     private var autoFailoverJob: Job? = null
     private var finishOnBackKeyUp: Boolean = false
@@ -262,6 +270,7 @@ class LivePlayerActivity : BaseActivity() {
         AppLog.i("LivePlayer", "activity:onDestroy:start")
         messageClient?.close()
         messageClient = null
+        shortcutHintJob?.cancel()
         debugJob?.cancel()
         autoFailoverJob?.cancel()
         autoFailoverInFlight = false
@@ -420,6 +429,8 @@ class LivePlayerActivity : BaseActivity() {
 
         if (isInteractionKey(keyCode)) noteUserInteraction()
 
+        if (dispatchLiveCustomShortcutIfNeeded(event)) return true
+
         when (keyCode) {
             KeyEvent.KEYCODE_MENU,
             KeyEvent.KEYCODE_SETTINGS,
@@ -508,6 +519,130 @@ class LivePlayerActivity : BaseActivity() {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    private fun dispatchLiveCustomShortcutIfNeeded(event: KeyEvent): Boolean {
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        if (event.repeatCount != 0) return false
+
+        val keyCode = event.keyCode
+        if (keyCode <= 0 || keyCode == KeyEvent.KEYCODE_UNKNOWN) return false
+        if (PlayerCustomShortcutsStore.isForbiddenKeyCode(keyCode)) return false
+
+        // Keep DPAD navigation working inside settings panel.
+        if (binding.settingsPanel.visibility == View.VISIBLE) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> return false
+            }
+        }
+
+        val binding = BiliClient.prefs.playerCustomShortcuts.firstOrNull { it.keyCode == keyCode } ?: return false
+
+        when (val action = binding.action) {
+            PlayerCustomShortcutAction.ToggleDanmaku -> {
+                noteUserInteraction()
+                session = session.copy(danmaku = session.danmaku.copy(enabled = !session.danmaku.enabled))
+                this.binding.danmakuView.invalidate()
+                updateDanmakuButton()
+                val state = if (session.danmaku.enabled) "开" else "关"
+                showShortcutHint("弹幕：$state")
+                return true
+            }
+
+            is PlayerCustomShortcutAction.SetDanmakuOpacity -> {
+                noteUserInteraction()
+                val target = action.opacity.takeIf { it.isFinite() }?.coerceIn(0.05f, 1.0f) ?: session.danmaku.opacity
+                val current = session.danmaku.opacity
+                val next =
+                    if (sameFloat(current, target)) {
+                        shortcutPrevDanmakuOpacityByKey[keyCode] ?: target
+                    } else {
+                        shortcutPrevDanmakuOpacityByKey[keyCode] = current
+                        target
+                    }
+                session = session.copy(danmaku = session.danmaku.copy(opacity = next))
+                this.binding.danmakuView.invalidate()
+                showShortcutHint("弹幕透明度：${String.format(Locale.US, "%.2f", next)}")
+                return true
+            }
+
+            is PlayerCustomShortcutAction.SetDanmakuTextSize -> {
+                noteUserInteraction()
+                val target = action.textSizeSp.takeIf { it.isFinite() }?.coerceIn(10f, 60f) ?: session.danmaku.textSizeSp
+                val current = session.danmaku.textSizeSp
+                val next =
+                    if (sameFloat(current, target)) {
+                        shortcutPrevDanmakuTextSizeByKey[keyCode] ?: target
+                    } else {
+                        shortcutPrevDanmakuTextSizeByKey[keyCode] = current
+                        target
+                    }
+                session = session.copy(danmaku = session.danmaku.copy(textSizeSp = next))
+                this.binding.danmakuView.invalidate()
+                showShortcutHint("弹幕大小：${next.toInt()}")
+                return true
+            }
+
+            is PlayerCustomShortcutAction.SetDanmakuSpeed -> {
+                noteUserInteraction()
+                val target = action.speedLevel.coerceIn(1, 10)
+                val current = session.danmaku.speedLevel
+                val next =
+                    if (current == target) {
+                        shortcutPrevDanmakuSpeedLevelByKey[keyCode] ?: target
+                    } else {
+                        shortcutPrevDanmakuSpeedLevelByKey[keyCode] = current
+                        target
+                    }
+                session = session.copy(danmaku = session.danmaku.copy(speedLevel = next))
+                this.binding.danmakuView.invalidate()
+                showShortcutHint("弹幕速度：$next")
+                return true
+            }
+
+            is PlayerCustomShortcutAction.SetDanmakuArea -> {
+                noteUserInteraction()
+                val target = action.area.takeIf { it.isFinite() }?.coerceIn(0.05f, 1.0f) ?: session.danmaku.area
+                val current = session.danmaku.area
+                val next =
+                    if (sameFloat(current, target)) {
+                        shortcutPrevDanmakuAreaByKey[keyCode] ?: target
+                    } else {
+                        shortcutPrevDanmakuAreaByKey[keyCode] = current
+                        target
+                    }
+                session = session.copy(danmaku = session.danmaku.copy(area = next))
+                this.binding.danmakuView.invalidate()
+                showShortcutHint("弹幕区域：${areaText(next)}")
+                return true
+            }
+
+            else -> return false
+        }
+    }
+
+    private fun showShortcutHint(text: String) {
+        if (!controlsVisible) setControlsVisible(true)
+        binding.tvSeekHint.text = text
+        binding.tvSeekHint.visibility = View.VISIBLE
+        shortcutHintJob?.cancel()
+        shortcutHintJob =
+            lifecycleScope.launch {
+                delay(2_000L)
+                binding.tvSeekHint.visibility = View.GONE
+            }
+    }
+
+    private fun sameFloat(a: Float, b: Float): Boolean {
+        if (!a.isFinite() || !b.isFinite()) return false
+        return kotlin.math.abs(a - b) < 0.0001f
     }
 
     private fun setupSettingsPanel() {
