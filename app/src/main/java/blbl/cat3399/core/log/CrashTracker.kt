@@ -21,13 +21,19 @@ object CrashTracker {
 
     fun install(context: Context) {
         val appContext = context.applicationContext
+        // 保存当前系统默认的异常处理器
         val previous = Thread.getDefaultUncaughtExceptionHandler()
+        // 设置一个新的全局异常处理器
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            // 当发生未捕获的异常时，这个 lambda 表达式会被执行
+            // 尝试将崩溃信息写入文件
             runCatching {
                 writeCrashFile(appContext, thread = thread, throwable = throwable)
             }.onFailure {
+                // 如果写入失败，记录警告日志
                 Log.w("$TAG", "write crash file failed", it)
             }
+            // 调用之前的异常处理器，保持原有的崩溃处理逻辑
             previous?.uncaughtException(thread, throwable)
         }
     }

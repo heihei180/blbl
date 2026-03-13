@@ -16,6 +16,18 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
+/**
+ * 设计亮点
+ * 1. 性能优化
+ *      - 使用channel解耦生产者和消费组
+ *      - 使用 BufferedOutputStream 批量写入文件
+ * 2. 可靠性保障
+ *      - 避免阻塞调用方线程
+ *      - 避免频繁写入文件
+ *      - 达到容量限制时优雅降级（停止写入但不停止应用）
+ *      - runCatching 包裹所有可能异常的操作
+ *
+ */
 object AppLog {
     private const val PREFIX = "BLBL"
     private const val LOG_DIR_NAME = "logs"
@@ -52,6 +64,11 @@ object AppLog {
         ) : FileEvent
     }
 
+    /*
+    * File-backed logging.
+    * 异步非阻塞设计，用于日志写入
+    * 使用 Channel 缓冲日志事件，容量 256，满时丢弃最旧的事件
+     */
     private val fileEvents =
         Channel<FileEvent>(
             capacity = FILE_EVENT_BUFFER,
@@ -69,11 +86,13 @@ object AppLog {
         if (initialized.getAndSet(true)) return
 
         val appContext = context.applicationContext
+        // 1. 创建日志目录：/data/data/blbl.cat3399/files/logs/
         val dir = File(appContext.filesDir, LOG_DIR_NAME)
         runCatching { dir.mkdirs() }
         logDir = dir
 
         val startedAtMs = System.currentTimeMillis()
+        // 2. 生成会话文件名（基于启动时间）
         val sessionName = buildSessionFileName(startedAtMs)
         val file = File(dir, sessionName)
         runCatching {
@@ -81,9 +100,11 @@ object AppLog {
         }
         sessionLogFile = file
 
+        // 4. 异步清理旧日志
         scope.launch {
             cleanupLogs(dir, keep = file)
         }
+        // 3. 启动后台 Writer 协程
         scope.launch {
             runFileWriter(file)
         }
@@ -93,6 +114,12 @@ object AppLog {
         return File(context.applicationContext.filesDir, LOG_DIR_NAME)
     }
 
+    /**
+     * 实际的日志写入逻辑
+     *  双通道日志
+     *  1. 打印到控制台
+     *  2. 写入文件
+     */
     private fun log(priority: Int, tag: String, msg: String, tr: Throwable?) {
         val fullTag = "$PREFIX/$tag"
         val rendered =
@@ -107,6 +134,9 @@ object AppLog {
         sessionLogFile ?: return
         if (fileLoggingDisabled.get()) return
         // Avoid any expensive formatting on the caller thread.
+
+        // 创建一个 FileEvent.Line 对象，并将其发送到 fileEvents 频道。
+        // 异步非阻塞的打印日志，使用 kt的 协程
         fileEvents.trySend(
             FileEvent.Line(
                 atMs = System.currentTimeMillis(),

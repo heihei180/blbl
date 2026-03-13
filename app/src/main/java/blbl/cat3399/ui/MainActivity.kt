@@ -52,6 +52,10 @@ import org.json.JSONObject
 import java.lang.ref.WeakReference
 import java.util.Locale
 
+
+/**
+ * 主界面
+ */
 class MainActivity : BaseActivity(), SidebarFocusHost {
     private lateinit var binding: ActivityMainBinding
     private lateinit var navAdapter: SidebarNavAdapter
